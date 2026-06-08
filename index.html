@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>National Policy Audit | Command Center</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        :root { --bg: #f4f7f4; --card: #ffffff; --green: #1b5e20; --border: #d0dcd0; --danger: #800026; }
+        body { font-family: -apple-system, sans-serif; background: var(--bg); color: #2c2c2c; padding: 40px; max-width: 1400px; margin: 0 auto; }
+        .header { border-left: 6px solid var(--green); padding-left: 20px; margin-bottom: 30px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1.5fr; gap: 25px; margin-bottom: 25px; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        #map-wrapper { position: relative; height: 500px; margin-bottom: 25px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+        #map { height: 100%; width: 100%; z-index: 1; }
+        
+        #hud {
+            position: absolute;
+            top: 25px;
+            right: 25px;
+            width: 300px;
+            background: rgba(255, 255, 255, 0.98);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(0,0,0,0.05);
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            z-index: 1000;
+            transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+            font-family: 'Inter', sans-serif;
+        }
+
+        .health-stat {
+            background: #f1f5f9;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 10px;
+            color: #475569;
+            border: 1px solid #e2e8f0;
+        }
+
+        .health-stat strong {
+            color: #0f172a;
+            font-size: 12px;
+        }
+        
+        .kpi-val { font-size: 72px; font-weight: 900; color: var(--green); margin: 0; letter-spacing: -3px; line-height: 1; }
+        .label { font-size: 11px; text-transform: uppercase; letter-spacing: 2px; font-weight: 700; color: #6d6d6d; display: block; margin-bottom: 8px; }
+        
+        .legend { display: flex; justify-content: space-between; margin-top: 10px; font-size: 10px; font-weight: 700; color: #666; }
+        .legend-item { display: flex; align-items: center; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+        
+        .insight-text { margin-top: 12px; font-size: 11px; font-weight: 700; padding: 8px; border-radius: 4px; background: #f9f9f9; line-height: 1.4; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <span class="label">Lucas Vilela, Jordan Ravetch, Noah David, Brisa Stites: Model vs EPA Index</span>
+        <h1 style="margin:0; color: var(--green);">Federal Pollution Burden Gap Identifier</h1>
+    </div>
+
+    <nav style="display: flex; gap: 20px; padding: 15px 0; background: transparent; border-bottom: 2px solid #d0dcd0; margin-bottom: 30px;">
+        <button id="btn-Dashboard" onclick="openTab('Dashboard')" style="cursor:pointer; border:none; background:none; font-size: 16px; font-family: inherit; color: #1b5e20; font-weight: bold; border-bottom: 3px solid #1b5e20; padding-bottom: 5px;">Dashboard</button>
+        <button id="btn-Methodology" onclick="openTab('Methodology')" style="cursor:pointer; border:none; background:none; font-size: 16px; font-family: inherit; color: #666; padding-bottom: 5px;">Methodology</button>
+    </nav>
+
+    <div id="Dashboard">
+        <div class="grid-2">
+            <div class="card">
+                <span class="label">Absolute National Blind Spots</span>
+                <div class="kpi-val" id="kpi-val">...</div>
+                <p style="font-size: 13px; color: #555; margin-top: 15px; line-height: 1.6;">
+                    Tracts with <strong style="color: var(--danger);">0.0 federal priority</strong> in the last decade, despite our model auditing a burden <strong style="color: var(--danger);">≥ 30 percentiles higher</strong>.
+                </p>
+            </div>
+            <div class="card">
+                <div style="text-align: center; width: 100%; margin-bottom: 10px;">
+                    <span class="label" style="display: inline-block; margin-bottom: 0;">Gap Distribution</span>
+                </div>
+                <div style="height: 180px; position: relative;">
+                    <canvas id="waterfallChart"></canvas>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><span class="dot" style="background:#1b5e20"></span> Agreement</div>
+                    <div class="legend-item"><span class="dot" style="background:#feb24c"></span> Slight Gap</div>
+                    <div class="legend-item"><span class="dot" style="background:#fc4e2a"></span> Underweighed</div>
+                    <div class="legend-item"><span class="dot" style="background:#800026"></span> Severe Gap</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card" style="margin-bottom: 25px;">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
+                <span class="label" style="margin:0;">Region Focus:</span>
+                <select id="stateSelector" onchange="loadState(this.value)" style="padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-weight: 700; cursor: pointer; background: white;">
+                </select>
+            </div>
+            <div style="font-size: 12px; color: #666; line-height: 1.6; max-width: 900px; border-top: 1px solid #eee; padding-top: 15px;">
+                This dashboard identifies neighborhoods overlooked by federal environmental policy. Our model uses a multiplier to show how pollution is amplified by local health issues like asthma and heart disease. <strong> Click any neighborhood to see its specific health "receipts" and a breakdown of the 12 factors driving its risk.</strong>
+            </div>
+        </div>
+
+        <div id="map-wrapper">
+            <div id="map"></div>
+            <div id="hud" style="opacity: 0;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
+                    <div>
+                        <div id="hud-id" style="font-size: 10px; letter-spacing: 1px; color: #999; font-weight: 700;">TRACT ID</div>
+                        <div id="hud-loc" style="font-size: 16px; font-weight: 800; color: #222;">
+                            <span id="hud-city">City</span>, <span id="hud-state">ST</span>
+                        </div>
+                        <div id="hud-county" style="font-size: 11px; color: #666; font-weight: 500;">County Name</div>
+                    </div>
+                    <div id="status-badge" style="padding: 4px 8px; border-radius: 4px; font-size: 9px; font-weight: 900; background: #f1f5f9; color: #64748b; text-transform: uppercase;">Status</div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+                    <div style="background: #f8fafc; padding: 10px; border-radius: 8px; border: 1px solid #e2e8f0;">
+                        <div style="font-size: 9px; font-weight: 700; color: #64748b; text-transform: uppercase; margin-bottom: 4px;">EPA Index</div>
+                        <div id="val-epa" style="font-size: 18px; font-weight: 800; color: #334155;">--</div>
+                    </div>
+                    <div style="background: #f0fdf4; padding: 10px; border-radius: 8px; border: 1px solid #dcfce7;">
+                        <div style="font-size: 9px; font-weight: 700; color: #166534; text-transform: uppercase; margin-bottom: 4px;">Audit Score</div>
+                        <div id="val-ces" style="font-size: 18px; font-weight: 800; color: #14532d;">--</div>
+                    </div>
+                </div>
+
+                <div style="font-size: 10px; font-weight: 700; color: #94a3b8; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px;">Biological Prevalence</div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 20px;">
+                    <div class="health-stat">Asthma: <strong id="hud-asthma">--</strong>%</div>
+                    <div class="health-stat">Cardio: <strong id="hud-cardio">--</strong>%</div>
+                    <div class="health-stat">Diabetes: <strong id="hud-diabetes">--</strong>%</div>
+                    <div class="health-stat">Housing: <strong id="hud-housing">--</strong>%</div>
+                </div>
+
+                <div style="margin-top: 15px; padding: 15px; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; display: flex; align-items: center; gap: 15px; position: relative; overflow: hidden;">
+                    <div id="gap-accent" style="position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: #f87171;"></div>
+                    <div style="flex-shrink: 0;">
+                        <div style="font-size: 9px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Policy Gap</div>
+                        <div id="hud-gap" style="font-size: 24px; font-weight: 900; color: #1e293b; line-height: 1;">+32.3</div>
+                    </div>
+                    <div style="border-left: 1px solid #f1f5f9; padding-left: 15px;">
+                        <div id="insight-box" style="font-size: 11px; line-height: 1.4; color: #64748b; font-weight: 500;">
+                            Select a tract to view the unacknowledged risk profile.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <span class="label">12-Variable Risk Divergence (Tract vs. National Average)</span>
+            <div style="height: 400px; margin-top: 20px;"><canvas id="divergenceChart"></canvas></div>
+            <div style="display: flex; justify-content: space-between; margin-top: 10px; font-size: 11px; font-weight: 700; color: #888;">
+                <span>← CLEANER THAN National AVG</span>
+                <span>WORSE THAN National AVG →</span>
+            </div>
+        </div>
+    </div>
+
+   <div id="Methodology" style="display:none; padding: 40px; max-width: 900px; margin: 0 auto; line-height: 1.6;">
+    
+        <h2 style="color: #1b5e20;">The Problem: Addressing "Missing Vulnerability"</h2>
+        <p>Standard federal models like EJScreen are often limited to measuring "what is in the air" while ignoring "who breathes it." This approach neglects the underlying health fragility and economic barriers that define true environmental risk.</p>
+        <p>On March 13, 2026, a federal judge in D.C. dismissed a lawsuit to force the government to bring the CEJST tool back online, making independent audits a critical necessity for community protection.</p>
+
+        <h2 style="color: #1b5e20; margin-top: 40px;">The EJ Baseline: Historical Frequency Audit</h2>
+        <p>The baseline for this audit is established through a <strong>10-year historical tally</strong> (2015–2024). For every census tract in the United States, we calculated how many times it was officially designated as a federal priority area over the last decade.</p>
+        
+        <div style="background: #f4f7f4; border-left: 5px solid #1b5e20; padding: 20px; margin: 20px 0; border-radius: 4px;">
+            <h4 style="margin-top: 0; color: #1b5e20;">The Visibility Index</h4>
+            <p style="margin-bottom: 0; font-size: 14px;">The raw frequency count (0–10) is converted into a <strong>national percentile score</strong> (0–100). This indicates a tract's relative visibility to federal policy:
+                <ul style="font-size: 13px; margin-top: 10px;">
+                    <li><strong>Score of 0:</strong> The tract has been invisible to federal priority filters for a decade.</li>
+                    <li><strong>Score of 100:</strong> The tract has been a constant, high-visibility priority for 10 years.</li>
+                </ul>
+            </p>
+        </div>
+        
+        
+
+        <h2 style="color: #1b5e20; margin-top: 40px;">The Interaction Engine</h2>
+        <p>We utilize the <strong>CalEnviroScreen (CES)</strong> framework from the OEHHA. This model identifies communities burdened by the intersection of high pollution and high population vulnerability using a multiplier logic.</p>
+
+        <div style="background: #1e293b; color: white; padding: 30px; border-radius: 12px; text-align: center; margin: 20px 0;">
+            <strong style="text-transform: uppercase; font-size: 12px; letter-spacing: 1px;">The Cumulative Impact Formula</strong>
+            <div style="font-size: 28px; margin: 15px 0;">Score = Pollution × Vulnerability</div>
+            <p style="font-size: 14px; opacity: 0.8;">By multiplying factors, we ensure that high pollution in a fragile community (e.g., high asthma or heart disease rates) results in an exponentially higher risk score than in a healthy one.</p>
+        </div>
+
+        
+
+        <h3 style="margin-top: 30px; color: #1b5e20;">Why California?</h3>
+        <ul style="padding-left: 20px;">
+            <li><strong>Innovation:</strong> Leads the country with 10.3 sustainability startups per 100,000 citizens.</li>
+            <li><strong>Workforce:</strong> Maintains over 545,000 clean energy jobs as of 2025.</li>
+            <li><strong>Legal Mandate:</strong> CES is the legal requirement for allocating Cap-and-Trade and state grant revenue in California.</li>
+        </ul>
+    </div>
+
+    <script>
+        function openTab(tabId) {
+            document.getElementById('Dashboard').style.display = (tabId === 'Dashboard') ? 'block' : 'none';
+            document.getElementById('Methodology').style.display = (tabId === 'Methodology') ? 'block' : 'none';
+
+            const btnDash = document.getElementById('btn-Dashboard');
+            const btnMeth = document.getElementById('btn-Methodology');
+
+            if (tabId === 'Dashboard') {
+                btnDash.style.fontWeight = 'bold';
+                btnDash.style.borderBottom = '3px solid #1b5e20';
+                btnDash.style.color = '#1b5e20';
+                btnMeth.style.fontWeight = 'normal';
+                btnMeth.style.borderBottom = 'none';
+                btnMeth.style.color = '#666';
+                if (typeof map !== 'undefined') {
+                    setTimeout(() => { map.invalidateSize(); }, 100);
+                }
+            } else {
+                btnMeth.style.fontWeight = 'bold';
+                btnMeth.style.borderBottom = '3px solid #1b5e20';
+                btnMeth.style.color = '#1b5e20';
+                btnDash.style.fontWeight = 'normal';
+                btnDash.style.borderBottom = 'none';
+                btnDash.style.color = '#666';
+            }
+            window.scrollTo(0, 0);
+        }
+
+        let divergenceChart;
+        let waterfallChart;
+        let geoLayer;
+        let selectedLayer = null; 
+        
+        let map = L.map('map').setView([38.0, -96.0], 4); 
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png').addTo(map);
+
+        const colors = { red: '#800026', orange: '#fc4e2a', yellow: '#feb24c', green: '#1b5e20', mutedGreen: '#c8d8c8' };
+        const prettyLabels = ['Ozone', 'PM 2.5', 'Diesel PM', 'Traffic', 'Water Risk', 'Cleanup Sites', 'Haz Waste', 'Lead Risk', 'Poverty', 'Unemployment', 'Ling. Isolation', 'Education'];
+        const driverDescriptions = ['Ground-level smog', 'Fine particulate matter', 'Diesel exhaust', 'Vehicle volume', 'Water contaminant risk', 'Remediation sites', 'Hazardous waste', 'Lead Risk', 'Poverty rate', 'Unemployment', 'Non-English households', 'No HS diploma'];
+
+        function getColor(d) {
+            if (d >= 50) return colors.red;
+            if (d >= 30) return colors.orange;
+            if (d >= 10) return colors.yellow;
+            return colors.green; 
+        }
+
+        async function loadState(fips) {
+            const res = await fetch(`audit_${fips}.json`);
+            const master = await res.json();
+            document.getElementById('kpi-val').innerText = master.kpi;
+            
+            const distributionData = [master.distribution.Green, master.distribution.Yellow, master.distribution.Orange, master.distribution.Red];
+            waterfallChart.data.datasets[0].data = distributionData;
+            
+            // Adjust Y-axis scale dynamically so labels don't get cut off
+            waterfallChart.options.scales.y.suggestedMax = Math.max(...distributionData) * 1.2;
+            
+            waterfallChart.update();
+            if (geoLayer) map.removeLayer(geoLayer);
+            selectedLayer = null;
+
+            geoLayer = L.geoJson(master.map_data, {
+                style: (f) => {
+                    const p = f.properties;
+                    if (p.ces < 50) return { fillColor: colors.mutedGreen, fillOpacity: 0.3, weight: 0.2, color: 'white' };
+                    return { fillColor: getColor(p.gap), fillOpacity: 0.85, weight: 0.8, color: 'white' };
+                },
+                onEachFeature: (f, layer) => {
+                    layer.on('click', (e) => {
+                        if (selectedLayer) { geoLayer.resetStyle(selectedLayer); }
+                        e.target.setStyle({ color: '#000', weight: 3, fillOpacity: 0.9 });
+                        if (!L.Browser.ie && !L.Browser.edge) { e.target.bringToFront(); }
+                        selectedLayer = e.target;
+                        const p = e.target.feature.properties;
+                        const gapVal = parseFloat(p.gap);
+                        document.getElementById('val-epa').innerText = p.epa.toFixed(1);
+                        document.getElementById('val-ces').innerText = p.ces.toFixed(1);
+                        const gapEl = document.getElementById('hud-gap');
+                        const accent = document.getElementById('gap-accent');
+                        gapEl.innerText = (gapVal > 0 ? "+" : "") + gapVal.toFixed(1);
+                        if (gapVal >= 40) { gapEl.style.color = "#991b1b"; accent.style.background = "#ef4444"; } 
+                        else if (gapVal >= 15) { gapEl.style.color = "#92400e"; accent.style.background = "#f59e0b"; } 
+                        else { gapEl.style.color = "#166534"; accent.style.background = "#10b981"; }
+                        let cleanCity = p.city.split(',')[0].replace(' CCD', '').trim();
+                        let cleanCounty = p.county.replace(' County', '').replace(` ${p.state_label}`, '').trim();
+                        document.getElementById('hud-id').innerText = `TRACT #${p.GEOID}`;
+                        document.getElementById('hud-city').innerText = cleanCity;
+                        document.getElementById('hud-state').innerText = p.state_label;
+                        document.getElementById('hud-county').innerText = `${cleanCounty} County`;
+                        const locRow = document.getElementById('hud-loc');
+                        if (cleanCity.toLowerCase() === cleanCounty.toLowerCase() || cleanCity === "Unknown" || cleanCity === "") { locRow.style.display = "none"; } 
+                        else { locRow.style.display = "block"; }
+                        let insight = gapVal >= 40 ? "Severe gap: Biological markers suggest a critical policy oversight." : (gapVal >= 15 ? "Moderate divergence: Local health trends outpace federal baseline." : "Policy Alignment: Federal metrics reflect the local risk profile.");
+                        document.getElementById('insight-box').innerText = insight;
+                        const formatStat = (val) => { return (val === 0 || val === "0.0" || !val) ? "N/A" : val.toFixed(1) + "%"; };
+                        document.getElementById('hud-asthma').innerText = formatStat(p.asthma);
+                        document.getElementById('hud-cardio').innerText = formatStat(p.cardio);
+                        document.getElementById('hud-diabetes').innerText = formatStat(p.diabetes);
+                        document.getElementById('hud-housing').innerText = formatStat(p.housing);
+                        const badge = document.getElementById('status-badge');
+                        if (p.ces < 50) { badge.innerText = "Not Burdened"; badge.style.background = "#f1f5f9"; badge.style.color = "#64748b"; } 
+                        else if (gapVal >= 40) { badge.innerText = "Critical Blind Spot"; badge.style.background = "#fee2e2"; badge.style.color = "#991b1b"; } 
+                        else if (gapVal >= 15) { badge.innerText = "Under-Prioritized"; badge.style.background = "#fef3c7"; badge.style.color = "#92400e"; } 
+                        else { badge.innerText = "Policy Aligned"; badge.style.background = "#dcfce7"; badge.style.color = "#166534"; }
+                        updateDivergenceChart(p.drivers, p.state_avg);
+                        document.getElementById('hud').style.opacity = "1";
+                    });
+                }
+            }).addTo(map);
+            map.fitBounds(geoLayer.getBounds(), { padding: [30, 30], animate: true, duration: 1.5 });
+        }
+
+        function updateDivergenceChart(drivers, stateAvg) {
+            divergenceChart.data.datasets[0].data = drivers.map((val, i) => val - stateAvg[i]);
+            divergenceChart.data.datasets[0].backgroundColor = drivers.map((val, i) => (val - stateAvg[i]) > 0 ? '#800026' : '#1b5e20');
+            divergenceChart.update();
+        }
+
+        const fipsToName = { "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas", "06": "California", "08": "Colorado", "09": "Connecticut", "10": "Delaware", "11": "Dist. of Columbia", "12": "Florida", "13": "Georgia", "15": "Hawaii", "16": "Idaho", "17": "Illinois", "18": "Indiana", "19": "Iowa", "20": "Kansas", "21": "Kentucky", "22": "Louisiana", "23": "Maine", "24": "Maryland", "25": "Massachusetts", "26": "Michigan", "27": "Minnesota", "28": "Mississippi", "29": "Missouri", "30": "Montana", "31": "Nebraska", "32": "Nevada", "33": "New Hampshire", "34": "New Jersey", "35": "New Mexico", "36": "New York", "37": "North Carolina", "38": "North Dakota", "39": "Ohio", "40": "Oklahoma", "41": "Oregon", "42": "Pennsylvania", "44": "Rhode Island", "45": "South Carolina", "46": "South Dakota", "47": "Tennessee", "48": "Texas", "49": "Utah", "50": "Vermont", "51": "Virginia", "53": "Washington", "54": "West Virginia", "55": "Wisconsin", "56": "Wyoming", "72": "Puerto Rico" };
+        const activeFips = ['01', '02', '04', '05', '06', '08', '09', '10', '11', '12', '13', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '44', '45', '46', '47', '48', '49', '50', '51', '53', '54', '55', '56', '72'];                                                      
+
+        async function init() {
+            const selector = document.getElementById('stateSelector');
+            activeFips.forEach(fips => {
+                const opt = document.createElement('option');
+                opt.value = fips;
+                opt.innerHTML = fipsToName[fips] || `FIPS ${fips}`;
+                selector.appendChild(opt);
+            });
+            selector.value = '06';
+
+            const waterfallCtx = document.getElementById('waterfallChart');
+            
+            // CUSTOM PLUGIN: Draws numbers above the bars
+            const topLabelsPlugin = {
+                id: 'topLabels',
+                afterDatasetsDraw(chart) {
+                    const { ctx, data, scales: { x, y } } = chart;
+                    ctx.save();
+                    ctx.font = 'bold 11px Inter, sans-serif';
+                    ctx.fillStyle = '#2c2c2c';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'bottom';
+
+                    data.datasets[0].data.forEach((value, index) => {
+                        if (value > 0) {
+                            const xPos = x.getPixelForValue(index);
+                            const yPos = y.getPixelForValue(value);
+                            ctx.fillText(value.toLocaleString(), xPos, yPos - 5);
+                        }
+                    });
+                }
+            };
+
+            waterfallChart = new Chart(waterfallCtx, {
+                type: 'bar',
+                plugins: [topLabelsPlugin],
+                data: {
+                    labels: ['Agreement (0-10 pts)', 'Slight Gap (10-30 pts)', 'Underweighed (30-50 pts)', 'Severe Gap (50+ pts)'],
+                    datasets: [{ data: [0, 0, 0, 0], backgroundColor: [colors.green, colors.yellow, colors.orange, colors.red], borderRadius: 6 }]
+                },
+                options: { 
+                    maintainAspectRatio: false, 
+                    plugins: { legend: { display: false } }, 
+                    scales: { 
+                        y: { 
+                            display: false, 
+                            beginAtZero: true,
+                            suggestedMax: 10 
+                        }, 
+                        x: { grid: { display: false }, ticks: { font: { size: 9, weight: '700' } } } 
+                    } 
+                }
+            });
+
+            divergenceChart = new Chart(document.getElementById('divergenceChart'), {
+                type: 'bar',
+                data: { labels: prettyLabels, datasets: [{ data: Array(12).fill(0), backgroundColor: '#ddd', borderRadius: 4 }] },
+                options: { indexAxis: 'y', maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { afterLabel: (c) => '\n' + driverDescriptions[c.dataIndex] } } }, scales: { x: { min: -100, max: 100 }, y: { ticks: { font: { weight: '700', size: 11 } } } } }
+            });
+
+            loadState('06'); 
+        }
+        init();
+    </script>
+</body>
+</html>
